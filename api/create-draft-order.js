@@ -50,7 +50,7 @@ export default async function handler(req, res) {
                     'Content-Type': 'application/json',
                     'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN // Use environment variable for access token
                 },
-                body: JSON.stringify({ order: cartDetails })
+                body: JSON.stringify({ draft_order: cartDetails })
             });
 
             // Log the full response for debugging if there's an error
