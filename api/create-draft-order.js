@@ -14,16 +14,15 @@ export default async function handler(req, res) {
 
     // Proceed with handling POST request
     if (req.method === 'POST') {
-        const { products, email, firstName, lastName } = req.body;
+    const { products, firstName, lastName } = req.body;
 
         // Validate that the required fields are present
-        if (!products || !email || !firstName || !lastName) {
+        if (!products || !firstName || !lastName) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
         // Build the cart details for the Shopify draft order
         const cartDetails = {
-            email: email,
             // shipping_address: {
             //     first_name: firstName,
             //     last_name: lastName,
@@ -36,8 +35,7 @@ export default async function handler(req, res) {
             line_items: products,
             customer: {
                 first_name: firstName,
-                last_name: lastName,
-                email: email
+                last_name: lastName
             },
             financial_status: "pending", // Default to pending status, can be "paid", "authorized", etc.
             fulfillment_status: "unfulfilled", // Order status can be "fulfilled", "unfulfilled", or "partially_fulfilled"
