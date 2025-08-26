@@ -12,14 +12,14 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
         const { products, firstName, lastName } = req.body;
 
-        if (!products || !firstName || !lastName) {
+            if (!products || !firstName) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
         // Create a lean, guest-style draft order without customer or email
         const cartDetails = {
             line_items: products,
-            note: `Guest draft order created by ${firstName} ${lastName} (no email provided)`
+            note: `Order Placed by ${firstName} ${lastName || ''}`
         };
 
         try {
