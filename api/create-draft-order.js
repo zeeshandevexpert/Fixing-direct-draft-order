@@ -46,7 +46,7 @@ export default async function handler(req, res) {
 
         try {
             // Send the request to Shopify's API to create a draft order
-            const response = await fetch('https://fixings-direct-limited.myshopify.com/admin/api/2025-01/draft_orders.json', {
+            const response = await fetch('https://fixings-direct-limited.myshopify.com/admin/api/2025-07/draft_orders.json', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
