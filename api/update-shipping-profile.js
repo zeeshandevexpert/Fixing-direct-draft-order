@@ -22,8 +22,20 @@ export default async function handler(req, res) {
     const nantwichProfileId = "gid://shopify/DeliveryProfile/126331519350";
 
     const mutation = `
-      mutation assignProductToProfile($profileId: ID!, $productId: ID!) {
-        deliveryProfileAssignProduct(productIds: [$productId], profileId: $profileId) {
+      mutation updateProductDeliveryProfile($productId: ID!, $deliveryProfileId: ID!) {
+        productUpdate(input: {
+          id: $productId
+          deliveryProfile: {
+            id: $deliveryProfileId
+          }
+        }) {
+          product {
+            id
+            title
+            deliveryProfile {
+              id
+            }
+          }
           userErrors {
             field
             message
@@ -44,8 +56,8 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           query: mutation,
           variables: {
-            profileId: nantwichProfileId,
             productId: `gid://shopify/Product/${product.id}`,
+            deliveryProfileId: nantwichProfileId,
           },
         }),
       }
@@ -53,17 +65,22 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    if (data.errors || data.data?.deliveryProfileAssignProduct?.userErrors?.length) {
+    if (data.errors || data.data?.productUpdate?.userErrors?.length > 0) {
       console.error("Assignment failed:", JSON.stringify(data, null, 2));
       return res.status(500).json({
         success: false,
-        error: data.errors || data.data.deliveryProfileAssignProduct.userErrors,
+        error: data.errors || data.data.productUpdate.userErrors,
       });
     }
 
+    const updatedProduct = data.data?.productUpdate?.product;
+    
     return res.status(200).json({
       success: true,
       message: `✅ Product ${product.title} moved to Nantwich Branch`,
+      productId: product.id,
+      deliveryProfileId: updatedProduct?.deliveryProfile?.id,
+      updatedProduct: updatedProduct
     });
   } catch (err) {
     console.error("Webhook error:", err);
