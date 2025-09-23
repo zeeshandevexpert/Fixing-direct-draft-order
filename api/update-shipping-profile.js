@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     }
 
     // 2. Nantwich Branch profile ID (from your GraphQL query)
-    const nantwichProfileId = "gid://shopify/DeliveryProfile/126331519350";
+    const nantwichProfileId = process.env.SHOPIFY_PROFILE_2_ID;
 
     // First, get product variants to assign them to the delivery profile
     const productQuery = `
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
 
     // Get product variants first
     const productResponse = await fetch(
-      "https://fixings-direct-limited.myshopify.com/admin/api/2025-07/graphql.json",
+      `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-07/graphql.json`,
       {
         method: "POST",
         headers: {
@@ -97,7 +97,7 @@ export default async function handler(req, res) {
 
     // 3. Call Shopify GraphQL
     const response = await fetch(
-      "https://fixings-direct-limited.myshopify.com/admin/api/2025-07/graphql.json",
+      `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-07/graphql.json`,
       {
         method: "POST",
         headers: {
