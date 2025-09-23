@@ -116,7 +116,29 @@ export default async function handler(req, res) {
                 });
             }
 
-            // Step 3: Update product to assign shipping profile 2
+            // Step 3: First, let's fetch available shipping profiles to verify ID 2 exists
+            console.log('Fetching available shipping profiles...');
+            const profilesResponse = await fetch(
+                `https://fixings-direct-limited.myshopify.com/admin/api/2025-07/shipping_profiles.json`,
+                {
+                    headers: {
+                        'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+
+            if (!profilesResponse.ok) {
+                console.error('Failed to fetch shipping profiles:', profilesResponse.statusText);
+                // Continue with the update anyway, but log the issue
+            } else {
+                const profilesData = await profilesResponse.json();
+                console.log('Available shipping profiles:', profilesData.shipping_profiles?.map(p => ({ id: p.id, name: p.name })));
+            }
+
+            // Step 4: Update product to assign shipping profile 2
+            // Note: We need to include the shipping_profile in the product update
+            console.log(`Updating product ${productId} with shipping profile 2...`);
             const updateResponse = await fetch(
                 `https://fixings-direct-limited.myshopify.com/admin/api/2025-07/products/${productId}.json`,
                 {
@@ -128,16 +150,60 @@ export default async function handler(req, res) {
                     body: JSON.stringify({
                         product: {
                             id: productId,
-                            shipping_profile_id: 2
+                            shipping_profile: {
+                                id: 2
+                            }
                         }
                     })
                 }
             );
 
             if (!updateResponse.ok) {
-                const errorBody = await updateResponse.json();
+                const errorBody = await updateResponse.text();
                 console.error('Shopify Update API Error Response:', errorBody);
-                throw new Error(`Failed to update shipping profile: ${updateResponse.statusText}`);
+                
+                // Try alternative approach with shipping_profile_id
+                console.log('Trying alternative approach with shipping_profile_id...');
+                const altUpdateResponse = await fetch(
+                    `https://fixings-direct-limited.myshopify.com/admin/api/2025-07/products/${productId}.json`,
+                    {
+                        method: 'PUT',
+                        headers: {
+                            'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            product: {
+                                id: productId,
+                                shipping_profile_id: 2
+                            }
+                        })
+                    }
+                );
+
+                if (!altUpdateResponse.ok) {
+                    const altErrorBody = await altUpdateResponse.text();
+                    console.error('Alternative approach also failed:', altErrorBody);
+                    
+                    return res.status(500).json({
+                        error: 'Failed to update shipping profile',
+                        originalError: errorBody,
+                        alternativeError: altErrorBody,
+                        suggestion: 'Shipping profile ID 2 may not exist. Check available shipping profiles first.'
+                    });
+                }
+
+                const updatedProductData = await altUpdateResponse.json();
+                return res.status(200).json({
+                    success: true,
+                    message: 'Product successfully assigned to shipping profile 2 (using alternative method)',
+                    productId: productId,
+                    productTitle: product.title,
+                    shippingProfileId: 2,
+                    tags: product.tags,
+                    updatedProduct: updatedProductData.product,
+                    method: 'alternative'
+                });
             }
 
             const updatedProductData = await updateResponse.json();
