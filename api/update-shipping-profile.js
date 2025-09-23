@@ -1,88 +1,98 @@
 import fetch from 'node-fetch';
-import crypto from 'crypto';
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', 'https://ukfixingsdirect.com');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Shopify-Hmac-Sha256');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
 
-    // Verify Shopify webhook HMAC
-    const hmac = req.headers['x-shopify-hmac-sha256'];
-    
-    if (process.env.SHOPIFY_WEBHOOK_SECRET && hmac) {
-        // Get raw body for HMAC verification (Vercel provides this)
-        const rawBody = req.rawBody || JSON.stringify(req.body);
-        const digest = crypto
-            .createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET)
-            .update(rawBody, 'utf8')
-            .digest('base64');
-
-        if (hmac !== digest) {
-            console.error('HMAC verification failed:', { 
-                received: hmac, 
-                calculated: digest,
-                bodyType: typeof rawBody,
-                bodyLength: rawBody.length 
-            });
-            // For now, let's log and continue instead of blocking
-            console.log('⚠️ Continuing despite HMAC mismatch for debugging...');
-        } else {
-            console.log('✅ HMAC verification successful');
-        }
-    } else {
-        console.log('⚠️ HMAC verification skipped - webhook secret not configured');
-    }
-
     if (req.method === 'POST') {
-        const product = req.body;
+        const { productId } = req.body;
+
+        if (!productId) {
+            return res.status(400).json({ error: 'Product ID is required' });
+        }
 
         try {
-            // ✅ Only move if product has tag "warehouse_b"
-            if (product.tags && product.tags.includes('warehouse_b')) {
-                console.log(`📦 Product ${product.id} tagged warehouse_b → moving to Profile 2`);
+            // Step 1: Fetch product details to check for warehouse_b tag
+            const productResponse = await fetch(
+                `https://fixings-direct-limited.myshopify.com/admin/api/2025-07/products/${productId}.json`,
+                {
+                    headers: {
+                        'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
 
-                await moveProductToProfile2(product.id);
+            if (!productResponse.ok) {
+                const errorBody = await productResponse.json();
+                console.error('Shopify Product API Error Response:', errorBody);
+                throw new Error(`Failed to fetch product: ${productResponse.statusText}`);
             }
 
-            return res.status(200).json({ success: true });
+            const productData = await productResponse.json();
+            const product = productData.product;
+
+            // Step 2: Check if product has warehouse_b tag
+            const hasWarehouseBTag = product.tags && product.tags.includes('warehouse_b');
+
+            if (!hasWarehouseBTag) {
+                return res.status(200).json({
+                    success: false,
+                    message: 'Product does not have warehouse_b tag',
+                    productId: productId,
+                    tags: product.tags
+                });
+            }
+
+            // Step 3: Update product to assign shipping profile 2
+            const updateResponse = await fetch(
+                `https://fixings-direct-limited.myshopify.com/admin/api/2025-07/products/${productId}.json`,
+                {
+                    method: 'PUT',
+                    headers: {
+                        'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        product: {
+                            id: productId,
+                            shipping_profile_id: 2
+                        }
+                    })
+                }
+            );
+
+            if (!updateResponse.ok) {
+                const errorBody = await updateResponse.json();
+                console.error('Shopify Update API Error Response:', errorBody);
+                throw new Error(`Failed to update shipping profile: ${updateResponse.statusText}`);
+            }
+
+            const updatedProductData = await updateResponse.json();
+
+            return res.status(200).json({
+                success: true,
+                message: 'Product successfully assigned to shipping profile 2',
+                productId: productId,
+                productTitle: product.title,
+                shippingProfileId: 2,
+                tags: product.tags,
+                updatedProduct: updatedProductData.product
+            });
+
         } catch (error) {
-            console.error('Error handling webhook:', error);
-            return res.status(500).json({ error: 'Webhook handling failed', message: error.message });
+            console.error('Error updating shipping profile:', error);
+            return res.status(500).json({
+                error: 'Error updating shipping profile',
+                message: error.message
+            });
         }
     } else {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
-}
-
-// 👉 Helper function to move product to Profile 2
-async function moveProductToProfile2(productId) {
-    const profileId = process.env.SHOPIFY_PROFILE_2_ID; // Store Profile 2 ID in env
-
-    const response = await fetch(
-        `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-07/delivery_profiles/${profileId}/move.json`,
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN
-            },
-            body: JSON.stringify({
-                product_ids: [productId]
-            })
-        }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-        console.error('❌ Error moving product:', data);
-        throw new Error(`Shopify API error: ${response.statusText}`);
-    }
-
-    console.log(`✅ Product ${productId} moved to Profile 2`);
-    return data;
 }
