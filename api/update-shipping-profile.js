@@ -22,13 +22,24 @@ export default async function handler(req, res) {
             });
         }
 
-        const { productId } = req.body;
-
-        if (!productId) {
+        // Handle both product object and productId scenarios
+        let productId, productData = null;
+        
+        if (req.body.id) {
+            // If the request contains a full product object
+            productId = req.body.id;
+            productData = req.body; // We already have the product data
+            console.log('Received full product object, using ID:', productId);
+        } else if (req.body.productId) {
+            // If the request contains just productId
+            productId = req.body.productId;
+            console.log('Received productId:', productId);
+        } else {
             return res.status(400).json({ 
                 error: 'Product ID is required',
                 received: req.body,
-                expectedFormat: { productId: 'your-product-id' }
+                expectedFormat: { productId: 'your-product-id' },
+                alternativeFormat: 'Or send the full product object with an id field'
             });
         }
 
@@ -41,49 +52,57 @@ export default async function handler(req, res) {
         }
 
         try {
-            // Step 1: Fetch product details to check for warehouse_b tag
-            console.log(`Fetching product with ID: ${productId}`);
-            const productResponse = await fetch(
-                `https://fixings-direct-limited.myshopify.com/admin/api/2025-07/products/${productId}.json`,
-                {
-                    headers: {
-                        'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
-                        'Content-Type': 'application/json',
-                    },
-                }
-            );
+            let product;
+            
+            if (productData) {
+                // We already have the product data from the request
+                product = productData;
+                console.log(`Using provided product data: ${product.title}, Tags: ${product.tags}`);
+            } else {
+                // Step 1: Fetch product details to check for warehouse_b tag
+                console.log(`Fetching product with ID: ${productId}`);
+                const productResponse = await fetch(
+                    `https://fixings-direct-limited.myshopify.com/admin/api/2025-07/products/${productId}.json`,
+                    {
+                        headers: {
+                            'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+                            'Content-Type': 'application/json',
+                        },
+                    }
+                );
 
-            if (!productResponse.ok) {
-                const errorBody = await productResponse.text();
-                console.error('Shopify Product API Error Response:', errorBody);
-                
-                if (productResponse.status === 404) {
-                    return res.status(404).json({
-                        error: 'Product not found',
-                        productId: productId,
-                        message: 'The specified product ID does not exist'
+                if (!productResponse.ok) {
+                    const errorBody = await productResponse.text();
+                    console.error('Shopify Product API Error Response:', errorBody);
+                    
+                    if (productResponse.status === 404) {
+                        return res.status(404).json({
+                            error: 'Product not found',
+                            productId: productId,
+                            message: 'The specified product ID does not exist'
+                        });
+                    }
+                    
+                    return res.status(productResponse.status).json({
+                        error: 'Shopify API error',
+                        status: productResponse.status,
+                        message: productResponse.statusText,
+                        details: errorBody
                     });
                 }
-                
-                return res.status(productResponse.status).json({
-                    error: 'Shopify API error',
-                    status: productResponse.status,
-                    message: productResponse.statusText,
-                    details: errorBody
-                });
+
+                const fetchedProductData = await productResponse.json();
+                product = fetchedProductData.product;
+
+                if (!product) {
+                    return res.status(404).json({
+                        error: 'Product data is empty',
+                        productId: productId
+                    });
+                }
+
+                console.log(`Product found: ${product.title}, Tags: ${product.tags}`);
             }
-
-            const productData = await productResponse.json();
-            const product = productData.product;
-
-            if (!product) {
-                return res.status(404).json({
-                    error: 'Product data is empty',
-                    productId: productId
-                });
-            }
-
-            console.log(`Product found: ${product.title}, Tags: ${product.tags}`);
 
             // Step 2: Check if product has warehouse_b tag
             const hasWarehouseBTag = product.tags && product.tags.includes('warehouse_b');
