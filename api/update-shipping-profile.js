@@ -1,97 +1,45 @@
+import crypto from "crypto";
 import fetch from "node-fetch";
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "https://ukfixingsdirect.com");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
+  // Shopify sends only POST
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+  // Verify webhook signature
+  const hmac = req.headers["x-shopify-hmac-sha256"];
+  const body = JSON.stringify(req.body);
+  const digest = crypto
+    .createHmac("sha256", process.env.SHOPIFY_API_SECRET) // from app setup
+    .update(body, "utf8")
+    .digest("base64");
+
+  if (digest !== hmac) {
+    return res.status(401).json({ error: "Unauthorized webhook" });
   }
 
   try {
-    const { product } = req.body; // Shopify webhooks send { product: {...} }
+    const product = req.body;
 
-    if (!product || !product.id) {
-      return res.status(400).json({ error: "Invalid product payload" });
-    }
+    console.log("Webhook received → Product:", product.id, product.title);
 
-    const productId = product.id;
-    const hasWarehouseBTag =
-      product.tags && product.tags.includes("warehouse_b");
-
-    if (!hasWarehouseBTag) {
+    // Step 1: check tags
+    const hasWarehouseB = product.tags && product.tags.includes("warehouse_b");
+    if (!hasWarehouseB) {
       return res.status(200).json({
         success: false,
-        message: "Product does not have warehouse_b tag",
-        productId,
-        tags: product.tags,
+        message: "No warehouse_b tag, skipping",
       });
     }
 
-    if (!process.env.SHOPIFY_ACCESS_TOKEN) {
-      return res.status(500).json({
-        error: "SHOPIFY_ACCESS_TOKEN is not set",
-      });
-    }
+    // Step 2: assign to Nantwich Branch profile
+    // Replace with the real Nantwich profile ID you got earlier
+    const nantwichProfileId = "gid://shopify/DeliveryProfile/126331519350";
 
-    const shopifyFetch = async (query, variables = {}) => {
-      const response = await fetch(
-        "https://fixings-direct-limited.myshopify.com/admin/api/2024-10/graphql.json",
-        {
-          method: "POST",
-          headers: {
-            "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ query, variables }),
-        }
-      );
-      const data = await response.json();
-      if (data.errors) throw new Error(JSON.stringify(data.errors));
-      return data;
-    };
-
-    // Step 1: Find Nantwich Branch profile
-    const profilesQuery = `
-      query {
-        deliveryProfiles(first: 10) {
-          edges {
-            node {
-              id
-              name
-            }
-          }
-        }
-      }
-    `;
-    const profiles = await shopifyFetch(profilesQuery);
-
-    const nantwichProfileId = profiles.data.deliveryProfiles.edges.find(
-      (p) => p.node.name === "Nantwich Branch"
-    )?.node.id;
-
-    if (!nantwichProfileId) {
-      return res.status(404).json({
-        error: "Nantwich Branch profile not found",
-      });
-    }
-
-    // Step 2: Assign product to Nantwich Branch
-    const assignMutation = `
-      mutation assignProduct($profileId: ID!, $productId: ID!) {
-        deliveryProfileAssignProduct(
-          id: $profileId,
-          productIds: [$productId]
-        ) {
-          deliveryProfile {
-            id
-            name
-          }
+    const mutation = `
+      mutation assignProductToProfile($profileId: ID!, $productId: ID!) {
+        deliveryProfileAssignProduct(productIds: [$productId], profileId: $profileId) {
           userErrors {
             field
             message
@@ -100,24 +48,42 @@ export default async function handler(req, res) {
       }
     `;
 
-    const variables = {
-      profileId: nantwichProfileId,
-      productId: `gid://shopify/Product/${productId}`,
-    };
+    const response = await fetch(
+      "https://fixings-direct-limited.myshopify.com/admin/api/2025-07/graphql.json",
+      {
+        method: "POST",
+        headers: {
+          "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: mutation,
+          variables: {
+            profileId: nantwichProfileId,
+            productId: `gid://shopify/Product/${product.id}`,
+          },
+        }),
+      }
+    );
 
-    const result = await shopifyFetch(assignMutation, variables);
+    const data = await response.json();
+
+    if (data.errors || data.data?.deliveryProfileAssignProduct?.userErrors?.length) {
+      console.error("Shipping profile assignment failed:", data);
+      return res.status(500).json({
+        success: false,
+        error: data.errors || data.data.deliveryProfileAssignProduct.userErrors,
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      productId,
-      productTitle: product.title,
-      assignedProfile: result.data.deliveryProfileAssignProduct.deliveryProfile,
-      errors: result.data.deliveryProfileAssignProduct.userErrors,
+      message: `Product ${product.title} assigned to Nantwich Branch`,
     });
   } catch (error) {
-    console.error("Error in handler:", error);
+    console.error("Webhook error:", error);
     return res.status(500).json({
-      error: "Error processing request",
+      error: "Internal server error",
       message: error.message,
     });
   }
